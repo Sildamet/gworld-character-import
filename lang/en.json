@@ -1,0 +1,15 @@
+{
+  "GWORLDIMPORT": {
+    "ImportButton": "Import from GCA",
+    "DialogTitle": "Import {name} from GCA5",
+    "DialogHint": "Select a character file exported from GCA5's File → Export → Export To Foundry VTT plugin. This will replace this actor's attributes, traits, skills and equipment with the contents of the file.",
+    "FileLabel": "GCA5 export file",
+    "NoFileSelected": "No file was selected.",
+    "ReadFailed": "Couldn't read the selected file: {message}",
+    "ParseFailed": "Couldn't parse the selected file: {message}",
+    "ApplyFailed": "The file was read, but applying it to the actor failed: {message}",
+    "Success": "Imported {name} from GCA5.",
+    "ReportIntro": "Everything below was skipped or defaulted while importing {name}:",
+    "ChatSpeaker": "GWorld Character Import"
+  }
+}
