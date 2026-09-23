@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify module.json version matches the tag
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          manifest_version="$(node -p "require('./module.json').version")"
+          if [ "$tag_version" != "$manifest_version" ]; then
+            echo "Tag v$tag_version does not match module.json version $manifest_version" >&2
+            exit 1
+          fi
+
+      - name: Build module.zip
+        run: |
+          mkdir -p dist
+          zip -r dist/module.zip module.json scripts styles lang templates
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            module.json
+            dist/module.zip
