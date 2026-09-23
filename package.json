@@ -1,0 +1,14 @@
+{
+  "name": "gworld-character-import",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Foundry VTT module to import GCA5-exported GURPS characters into GWorld character actors.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1",
+    "vitest": "^2.1.4"
+  }
+}
