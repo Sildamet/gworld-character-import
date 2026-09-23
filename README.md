@@ -64,3 +64,17 @@ npm test
 
 The mapping rationale is documented in comments in `scripts/importer/`; the GCA5 export plugin itself lives in
 [`gca-export/`](gca-export/).
+
+### Releasing
+
+Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml), triggered by pushing a
+version tag:
+
+1. Bump `version` in `module.json` and commit it.
+2. `git tag vX.Y.Z && git push origin vX.Y.Z` (the tag must match `module.json`'s version, or the workflow fails).
+
+The workflow zips the module's runtime files into `module.zip` and creates a GitHub Release with **both**
+`module.json` and `module.zip` attached as separate assets — `module.json` stays available on its own outside the
+zip, which is what lets Foundry's installer fetch just the manifest without downloading the whole package. Both
+`manifest` and `download` in `module.json` point at `.../releases/latest/download/...`, a stable URL that always
+resolves to the most recent release regardless of version.
