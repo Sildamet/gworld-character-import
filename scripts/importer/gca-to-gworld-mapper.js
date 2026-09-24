@@ -17,25 +17,57 @@ const BASIC_SPEED_STEP = 0.25;
 const ATTRIBUTE_ALIASES = { ST: "ST", DX: "DX", IQ: "IQ", HT: "HT", WILL: "Will", PER: "Per" };
 const DIFFICULTY_CODES = new Set(["E", "A", "H", "VH"]);
 
+/**
+ * GWorldVTT's own trait-effects engine (src/rules/trait-effects.ts) already
+ * recognizes traits named "Extra ST/DX/IQ/HT" etc. by name and adds their
+ * levels on top of `system.attributes`/`system.purchased` at derive time —
+ * its comment says outright "GCA carries them by these names". If this
+ * importer also baked that same bonus into the raw attribute/purchased
+ * score (by using GCA's already-inflated final value directly), the levels
+ * would be billed twice: once as the trait's own points, once again as a
+ * phantom attribute purchase. These tables let the mapper detect those
+ * traits, set the item's `levels` field so GWorldVTT's engine applies the
+ * bonus itself, and subtract the same amount from the raw score it derives
+ * so the two don't stack. Per-level costs are the GURPS 4e Basic Set
+ * defaults; a racial cost multiplier would throw the derived `levels` off,
+ * which isn't detectable from this export (see README limitations).
+ */
+const ATTRIBUTE_TRAIT_EFFECTS = {
+  "extra st": { field: "ST", costPerLevel: 10 },
+  "extra dx": { field: "DX", costPerLevel: 20 },
+  "extra iq": { field: "IQ", costPerLevel: 20 },
+  "extra ht": { field: "HT", costPerLevel: 10 },
+};
+
+const SECONDARY_TRAIT_EFFECTS = {
+  "extra hit points": { field: "hp", costPerLevel: 2 },
+  "extra fatigue points": { field: "fp", costPerLevel: 3 },
+  "extra will": { field: "will", costPerLevel: 5 },
+  "extra perception": { field: "per", costPerLevel: 5 },
+  "extra basic move": { field: "basicMove", costPerLevel: 5 },
+  "extra basic speed": { field: "basicSpeed", costPerLevel: 20, levelUnit: BASIC_SPEED_STEP },
+};
+
 export function mapGcaCharacterToGworld(character) {
   const warnings = [];
 
-  const attrs = mapAttributes(character, warnings);
-  const secondary = mapSecondary(character, attrs, warnings);
+  const traitsResult = mapTraits(character, warnings);
+  const attrs = mapAttributes(character, traitsResult.attributeCorrections, warnings);
+  const secondary = mapSecondary(character, attrs.final, traitsResult.secondaryCorrections, warnings);
   const misc = mapMisc(character, warnings);
   const details = mapDetails(character);
 
-  const traits = mapTraits(character, warnings);
+  const traits = traitsResult.items;
   const skills = mapSkills(character, warnings);
   const equipment = mapEquipment(character, warnings);
 
   noteOutOfScopeContent(character, warnings);
 
   const actorUpdate = {
-    "system.attributes.ST": attrs.ST,
-    "system.attributes.DX": attrs.DX,
-    "system.attributes.IQ": attrs.IQ,
-    "system.attributes.HT": attrs.HT,
+    "system.attributes.ST": attrs.bought.ST,
+    "system.attributes.DX": attrs.bought.DX,
+    "system.attributes.IQ": attrs.bought.IQ,
+    "system.attributes.HT": attrs.bought.HT,
     "system.purchased.hp": secondary.purchased.hp,
     "system.purchased.will": secondary.purchased.will,
     "system.purchased.per": secondary.purchased.per,
@@ -69,14 +101,30 @@ export function mapGcaCharacterToGworld(character) {
 // Attributes & secondary characteristics
 // ---------------------------------------------------------------------------
 
-function mapAttributes(character, warnings) {
+/**
+ * Returns both the GCA-reported (`final`) attribute score and the raw
+ * "bought" score with any Extra ST/DX/IQ/HT trait correction removed.
+ * `final` is what secondary-characteristic bases (HP=ST, Speed=(DX+HT)/4,
+ * etc.) must use, since that's the effective score GWorldVTT's own engine
+ * re-derives at runtime (bought + trait bonus); only `bought` goes into
+ * `system.attributes.*`, since the trait bonus is re-added there too.
+ */
+function mapAttributes(character, corrections, warnings) {
   const a = character?.attributes ?? {};
-  return {
+  const c = corrections ?? {};
+  const final = {
     ST: toInt(a.strength, 10, "ST", warnings),
     DX: toInt(a.dexterity, 10, "DX", warnings),
     IQ: toInt(a.intelligence, 10, "IQ", warnings),
     HT: toInt(a.health, 10, "HT", warnings),
   };
+  const bought = {
+    ST: final.ST - (c.ST ?? 0),
+    DX: final.DX - (c.DX ?? 0),
+    IQ: final.IQ - (c.IQ ?? 0),
+    HT: final.HT - (c.HT ?? 0),
+  };
+  return { final, bought };
 }
 
 /**
@@ -110,19 +158,22 @@ export function roundToStep(value, step) {
   return Math.round(value / step) * step;
 }
 
-function mapSecondary(character, attrs, warnings) {
+/** `finalAttrs` must be the GCA-reported (uncorrected) ST/DX/IQ/HT — see mapAttributes(). */
+function mapSecondary(character, finalAttrs, corrections, warnings) {
   const a = character?.attributes ?? {};
-  const hp = toInt(a.hitpoints, attrs.ST, "HP", warnings);
-  const will = toInt(a.will, attrs.IQ, "Will", warnings);
-  const per = toInt(a.perception, attrs.IQ, "Perception", warnings);
-  const fp = toInt(a.fatiguepoints, attrs.HT, "FP", warnings);
-  const basicSpeed = toFloat(a.basicspeed, (attrs.DX + attrs.HT) / 4, "Basic Speed", warnings);
-  const basicMove = toInt(a.basicmove, Math.floor(basicSpeed), "Basic Move", warnings);
+  const c = corrections ?? {};
+  const hp = toInt(a.hitpoints, finalAttrs.ST, "HP", warnings) - (c.hp ?? 0);
+  const will = toInt(a.will, finalAttrs.IQ, "Will", warnings) - (c.will ?? 0);
+  const per = toInt(a.perception, finalAttrs.IQ, "Perception", warnings) - (c.per ?? 0);
+  const fp = toInt(a.fatiguepoints, finalAttrs.HT, "FP", warnings) - (c.fp ?? 0);
+  const basicSpeed =
+    toFloat(a.basicspeed, (finalAttrs.DX + finalAttrs.HT) / 4, "Basic Speed", warnings) - (c.basicSpeed ?? 0);
+  const basicMove = toInt(a.basicmove, Math.floor(basicSpeed), "Basic Move", warnings) - (c.basicMove ?? 0);
 
   return {
     hp,
     fp,
-    purchased: derivePurchasedSecondary(attrs, { hp, will, per, fp, basicSpeed, basicMove }),
+    purchased: derivePurchasedSecondary(finalAttrs, { hp, will, per, fp, basicSpeed, basicMove }),
   };
 }
 
@@ -166,10 +217,40 @@ function mapTraits(character, warnings) {
   const ads = asList(character?.traits?.adslist);
   const disads = asList(character?.traits?.disadslist);
 
+  const attributeCorrections = { ST: 0, DX: 0, IQ: 0, HT: 0 };
+  const secondaryCorrections = { hp: 0, fp: 0, will: 0, per: 0, basicMove: 0, basicSpeed: 0 };
+
   const items = [
     ...ads.map((entry) => traitItem(entry, isPerkByPoints(entry) ? "perk" : "advantage")),
     ...disads.map((entry) => traitItem(entry, isQuirkByPoints(entry) ? "quirk" : "disadvantage")),
   ].filter((item) => item.name);
+
+  for (const item of items) {
+    const key = normalizeTraitEffectName(item.name);
+
+    const attributeEffect = ATTRIBUTE_TRAIT_EFFECTS[key];
+    if (attributeEffect) {
+      const levels = attributeGrantLevels(item.system.points, attributeEffect.costPerLevel);
+      item.system.levels = levels;
+      attributeCorrections[attributeEffect.field] += levels;
+      warnings.push(
+        `Trait "${item.name}" grants ${levels} level(s) of ${attributeEffect.field} through GWorldVTT's own trait ` +
+          `rules, so that many levels were excluded from the imported ${attributeEffect.field} score to avoid billing its points twice.`,
+      );
+      continue;
+    }
+
+    const secondaryEffect = SECONDARY_TRAIT_EFFECTS[key];
+    if (secondaryEffect) {
+      const levels = attributeGrantLevels(item.system.points, secondaryEffect.costPerLevel);
+      item.system.levels = levels;
+      secondaryCorrections[secondaryEffect.field] += levels * (secondaryEffect.levelUnit ?? 1);
+      warnings.push(
+        `Trait "${item.name}" grants ${levels} level(s) of ${secondaryEffect.field} through GWorldVTT's own trait ` +
+          `rules, so that was excluded from the imported ${secondaryEffect.field} value to avoid billing its points twice.`,
+      );
+    }
+  }
 
   const languageCount = asList(character?.traits?.languagelist).length;
   const cultureCount = asList(character?.traits?.culturalfamiliaritylist).length;
@@ -180,7 +261,20 @@ function mapTraits(character, warnings) {
     );
   }
 
-  return items;
+  return { items, attributeCorrections, secondaryCorrections };
+}
+
+/** Mirrors GWorldVTT's own trait-name normalization (rules/trait-effects.ts effectKey/matchName). */
+export function normalizeTraitEffectName(rawName) {
+  let name = String(rawName ?? "").trim().toLowerCase();
+  name = name.replace(/\s+\d+$/, ""); // a level written into the name, e.g. "Extra ST 2"
+  name = name.replace(/\s*\([^()]*%[^()]*\)\s*$/, ""); // a trailing modifier list, e.g. "(Size, -10%)"
+  return name.trim();
+}
+
+/** How many levels of a trait the points billed pay for, at the given GURPS 4e per-level cost. */
+function attributeGrantLevels(points, costPerLevel) {
+  return Math.max(1, Math.round(points / costPerLevel));
 }
 
 function isPerkByPoints(entry) {

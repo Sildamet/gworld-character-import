@@ -50,6 +50,14 @@ file has any of these, the post-import report will say so.
   export doesn't separate them from advantages either.
 - A racial template's or trait's effect on HP/Will/Per/FP/Speed/Move can't be told apart from character points spent
   on the same stat, since v1 doesn't parse templates — both land in `purchased`.
+- GWorldVTT's own rules already recognize traits named "Extra ST/DX/IQ/HT", "Extra Hit Points", "Extra Fatigue
+  Points", "Extra Will", "Extra Perception", "Extra Basic Move" and "Extra Basic Speed" by name, and apply their
+  bonus on top of `system.attributes`/`system.purchased` at derive time. To avoid billing those points twice
+  (once as the trait, once as a phantom attribute purchase — see `ATTRIBUTE_TRAIT_EFFECTS`/`SECONDARY_TRAIT_EFFECTS`
+  in `gca-to-gworld-mapper.js`), the importer backs the trait's contribution out of the raw score it imports and
+  sets the trait item's `levels` field instead, using GURPS 4e Basic Set per-level costs (e.g. DX at 20/level). A
+  racial template that changes that per-level cost isn't detectable from this export and would throw the derived
+  `levels` off.
 - Weapon Parry/Block bonuses aren't imported: GCA5's export gives the final calculated Parry/Block number, not a
   modifier, so importing it directly would double-count against GWorld's own calculation.
 - Equipment carried/equipped state isn't imported — GCA5's export doesn't carry it reliably, so everything comes in

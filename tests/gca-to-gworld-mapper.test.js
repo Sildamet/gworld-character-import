@@ -4,6 +4,7 @@ import {
   mapGcaCharacterToGworld,
   normalizeAttribute,
   normalizeDifficulty,
+  normalizeTraitEffectName,
   parseRange,
   parseRateOfFire,
   roundToStep,
@@ -197,5 +198,88 @@ describe("mapGcaCharacterToGworld", () => {
     const character = baseCharacter({ abilities: { spelllist: [{ name: "Fireball" }] } });
     const { warnings } = mapGcaCharacterToGworld(character);
     expect(warnings.some((w) => w.includes("spell"))).toBe(true);
+  });
+
+  // Regression test: GWorldVTT's own trait-effects engine already recognizes
+  // "Extra ST/DX/IQ/HT" traits by name and adds their levels on top of
+  // system.attributes at derive time. GCA's exported attribute score is
+  // already inflated by that trait, so importing it directly and also
+  // importing the trait billed its points twice (reported by a real user
+  // after installing the module).
+  it("does not double-count an 'Extra DX' trait's points against both the trait and the DX score", () => {
+    const character = baseCharacter({
+      attributes: {
+        strength: 10,
+        dexterity: 11, // GCA's final DX already includes the Extra DX +1
+        intelligence: 10,
+        health: 10,
+        hitpoints: 10,
+        will: 10,
+        perception: 10,
+        fatiguepoints: 10,
+        basicspeed: "5.25", // (11+10)/4 with the inflated DX
+        basicmove: 5,
+      },
+      traits: {
+        tl: 3,
+        sizemodifier: 0,
+        adslist: [{ name: "Extra DX", points: 20, text: "", pageref: "B15" }],
+      },
+    });
+    const { actorUpdate, items } = mapGcaCharacterToGworld(character);
+
+    // The raw "bought" DX excludes the trait's contribution...
+    expect(actorUpdate["system.attributes.DX"]).toBe(10);
+
+    // ...and the trait carries its own levels so GWorldVTT's engine adds the
+    // +1 back on its own, rather than the importer baking it into DX AND
+    // billing the trait's 20 points on top.
+    const trait = items.find((i) => i.name === "Extra DX");
+    expect(trait.system.levels).toBe(1);
+    expect(trait.system.points).toBe(20);
+  });
+
+  it("does not double-count an 'Extra Hit Points' trait against both the trait and purchased HP", () => {
+    const character = baseCharacter({
+      attributes: {
+        strength: 10,
+        dexterity: 10,
+        intelligence: 10,
+        health: 10,
+        hitpoints: 12, // 10 base + 2 from the Extra Hit Points trait
+        will: 10,
+        perception: 10,
+        fatiguepoints: 10,
+        basicspeed: "5",
+        basicmove: 5,
+      },
+      traits: {
+        tl: 3,
+        sizemodifier: 0,
+        adslist: [{ name: "Extra Hit Points", points: 4, text: "", pageref: "B16" }],
+      },
+    });
+    const { actorUpdate, items } = mapGcaCharacterToGworld(character);
+
+    expect(actorUpdate["system.purchased.hp"]).toBe(0);
+    expect(actorUpdate["system.hp.value"]).toBe(10);
+
+    const trait = items.find((i) => i.name === "Extra Hit Points");
+    expect(trait.system.levels).toBe(2);
+    expect(trait.system.points).toBe(4);
+  });
+});
+
+describe("normalizeTraitEffectName", () => {
+  it("strips a level number written into the trait's name", () => {
+    expect(normalizeTraitEffectName("Extra ST 2")).toBe("extra st");
+  });
+
+  it("strips a trailing percentage-modifier list", () => {
+    expect(normalizeTraitEffectName("Extra HT (Size, -10%)")).toBe("extra ht");
+  });
+
+  it("lowercases and trims plain names", () => {
+    expect(normalizeTraitEffectName("  Extra DX  ")).toBe("extra dx");
   });
 });
