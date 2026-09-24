@@ -226,11 +226,26 @@ function mapTraits(character, warnings) {
   ].filter((item) => item.name);
 
   for (const item of items) {
+    // GCA writes a leveled trait's LevelName after its name in parentheses,
+    // e.g. "Extra DX (1)" for one level. GWorldVTT's own trait-effects engine
+    // expects the level count in the item's `levels` field and the name bare
+    // ("Extra DX") -- its own name-matching only strips a trailing number
+    // written *without* parentheses ("Extra ST 2"), so a name like
+    // "Extra DX (1)" isn't recognized by GWorldVTT at all: no bonus gets
+    // applied, no matter what this importer does with points or levels.
+    // Stripping it here fixes recognition for every leveled trait GCA
+    // exports this way, not just the ones this module special-cases below.
+    const numericLevel = extractTrailingNumericLevel(item.name);
+    if (numericLevel) {
+      item.name = numericLevel.name;
+      item.system.levels = numericLevel.level;
+    }
+
     const key = normalizeTraitEffectName(item.name);
 
     const attributeEffect = ATTRIBUTE_TRAIT_EFFECTS[key];
     if (attributeEffect) {
-      const levels = attributeGrantLevels(item.system.points, attributeEffect.costPerLevel);
+      const levels = numericLevel?.level ?? attributeGrantLevels(item.system.points, attributeEffect.costPerLevel);
       item.system.levels = levels;
       attributeCorrections[attributeEffect.field] += levels;
       warnings.push(
@@ -242,7 +257,7 @@ function mapTraits(character, warnings) {
 
     const secondaryEffect = SECONDARY_TRAIT_EFFECTS[key];
     if (secondaryEffect) {
-      const levels = attributeGrantLevels(item.system.points, secondaryEffect.costPerLevel);
+      const levels = numericLevel?.level ?? attributeGrantLevels(item.system.points, secondaryEffect.costPerLevel);
       item.system.levels = levels;
       secondaryCorrections[secondaryEffect.field] += levels * (secondaryEffect.levelUnit ?? 1);
       warnings.push(
@@ -275,6 +290,23 @@ export function normalizeTraitEffectName(rawName) {
 /** How many levels of a trait the points billed pay for, at the given GURPS 4e per-level cost. */
 function attributeGrantLevels(points, costPerLevel) {
   return Math.max(1, Math.round(points / costPerLevel));
+}
+
+/**
+ * Splits a GCA-exported "<name> (<N>)" into its bare name and level, e.g.
+ * "Extra DX (1)" -> { name: "Extra DX", level: 1 }. Returns null when the
+ * name doesn't end in a purely-numeric parenthetical (a text LevelName like
+ * "Wealth (Comfortable)" or a modifier list like "(Size, -10%)" is left
+ * untouched).
+ */
+export function extractTrailingNumericLevel(name) {
+  const match = String(name ?? "").match(/^(.*?)\s*\((\d+)\)\s*$/);
+  if (!match) return null;
+  const level = parseInt(match[2], 10);
+  if (!Number.isFinite(level) || level <= 0) return null;
+  const cleanedName = match[1].trim();
+  if (!cleanedName) return null;
+  return { name: cleanedName, level };
 }
 
 function isPerkByPoints(entry) {

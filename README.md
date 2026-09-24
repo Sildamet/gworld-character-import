@@ -52,12 +52,16 @@ file has any of these, the post-import report will say so.
   on the same stat, since v1 doesn't parse templates — both land in `purchased`.
 - GWorldVTT's own rules already recognize traits named "Extra ST/DX/IQ/HT", "Extra Hit Points", "Extra Fatigue
   Points", "Extra Will", "Extra Perception", "Extra Basic Move" and "Extra Basic Speed" by name, and apply their
-  bonus on top of `system.attributes`/`system.purchased` at derive time. To avoid billing those points twice
-  (once as the trait, once as a phantom attribute purchase — see `ATTRIBUTE_TRAIT_EFFECTS`/`SECONDARY_TRAIT_EFFECTS`
-  in `gca-to-gworld-mapper.js`), the importer backs the trait's contribution out of the raw score it imports and
-  sets the trait item's `levels` field instead, using GURPS 4e Basic Set per-level costs (e.g. DX at 20/level). A
-  racial template that changes that per-level cost isn't detectable from this export and would throw the derived
-  `levels` off.
+  bonus on top of `system.attributes`/`system.purchased` at derive time. GCA exports a leveled trait as
+  `"<name> (<N>)"` (e.g. `"Extra DX (1)"`) — neither this importer's nor GWorldVTT's own name-matching recognizes
+  that parenthesized form, so the importer strips it, writes the bare name (`"Extra DX"`) and the level count into
+  the item's `levels` field (see `extractTrailingNumericLevel`/`ATTRIBUTE_TRAIT_EFFECTS`/`SECONDARY_TRAIT_EFFECTS`
+  in `gca-to-gworld-mapper.js`), and backs that same amount out of the raw score it imports — otherwise the points
+  get billed twice (once as the trait, once as a phantom attribute purchase) while GWorldVTT's own engine, unable
+  to recognize the parenthesized name, never actually applies the bonus at all. When GCA doesn't include a level
+  in the name, the level is instead derived from the trait's points at GURPS 4e Basic Set per-level costs (e.g. DX
+  at 20/level); a racial template that changes that per-level cost isn't detectable from this export and would
+  throw that derived level off.
 - Weapon Parry/Block bonuses aren't imported: GCA5's export gives the final calculated Parry/Block number, not a
   modifier, so importing it directly would double-count against GWorld's own calculation.
 - Equipment carried/equipped state isn't imported — GCA5's export doesn't carry it reliably, so everything comes in
