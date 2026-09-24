@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   derivePurchasedSecondary,
+  extractTrailingNumericLevel,
   mapGcaCharacterToGworld,
   normalizeAttribute,
   normalizeDifficulty,
@@ -205,8 +206,12 @@ describe("mapGcaCharacterToGworld", () => {
   // system.attributes at derive time. GCA's exported attribute score is
   // already inflated by that trait, so importing it directly and also
   // importing the trait billed its points twice (reported by a real user
-  // after installing the module).
-  it("does not double-count an 'Extra DX' trait's points against both the trait and the DX score", () => {
+  // after installing the module). GCA's real export names the trait
+  // "Extra DX (1)" (its LevelName in parentheses), not bare "Extra DX" --
+  // the first fix attempt missed this and silently did nothing, since
+  // neither this importer's nor GWorldVTT's own name-matching recognized
+  // the parenthesized form.
+  it("does not double-count a real GCA-style 'Extra DX (1)' trait against both the trait and the DX score", () => {
     const character = baseCharacter({
       attributes: {
         strength: 10,
@@ -223,7 +228,7 @@ describe("mapGcaCharacterToGworld", () => {
       traits: {
         tl: 3,
         sizemodifier: 0,
-        adslist: [{ name: "Extra DX", points: 20, text: "", pageref: "B15" }],
+        adslist: [{ name: "Extra DX (1)", points: 20, text: "", pageref: "B15" }],
       },
     });
     const { actorUpdate, items } = mapGcaCharacterToGworld(character);
@@ -231,15 +236,45 @@ describe("mapGcaCharacterToGworld", () => {
     // The raw "bought" DX excludes the trait's contribution...
     expect(actorUpdate["system.attributes.DX"]).toBe(10);
 
-    // ...and the trait carries its own levels so GWorldVTT's engine adds the
-    // +1 back on its own, rather than the importer baking it into DX AND
-    // billing the trait's 20 points on top.
+    // ...the name is cleaned so GWorldVTT's own engine recognizes it at
+    // runtime (its own name-matching doesn't strip a parenthesized level)...
     const trait = items.find((i) => i.name === "Extra DX");
+    expect(trait).toBeDefined();
+    // ...and it carries its own levels (read from the name, not re-derived
+    // from points) so GWorldVTT's engine adds the +1 back on its own, rather
+    // than the importer baking it into DX AND billing the trait's 20 points.
     expect(trait.system.levels).toBe(1);
     expect(trait.system.points).toBe(20);
   });
 
-  it("does not double-count an 'Extra Hit Points' trait against both the trait and purchased HP", () => {
+  it("also handles a bare 'Extra HT' name with no parenthesized level", () => {
+    const character = baseCharacter({
+      attributes: {
+        strength: 10,
+        dexterity: 10,
+        intelligence: 10,
+        health: 11,
+        hitpoints: 10,
+        will: 10,
+        perception: 10,
+        fatiguepoints: 11, // FP base = HT, so this final HT also lifts FP's base
+        basicspeed: "5.25",
+        basicmove: 5,
+      },
+      traits: {
+        tl: 3,
+        sizemodifier: 0,
+        adslist: [{ name: "Extra HT", points: 10, text: "", pageref: "B15" }],
+      },
+    });
+    const { actorUpdate, items } = mapGcaCharacterToGworld(character);
+
+    expect(actorUpdate["system.attributes.HT"]).toBe(10);
+    const trait = items.find((i) => i.name === "Extra HT");
+    expect(trait.system.levels).toBe(1);
+  });
+
+  it("does not double-count a real GCA-style 'Extra Hit Points (2)' trait against both the trait and purchased HP", () => {
     const character = baseCharacter({
       attributes: {
         strength: 10,
@@ -256,7 +291,7 @@ describe("mapGcaCharacterToGworld", () => {
       traits: {
         tl: 3,
         sizemodifier: 0,
-        adslist: [{ name: "Extra Hit Points", points: 4, text: "", pageref: "B16" }],
+        adslist: [{ name: "Extra Hit Points (2)", points: 4, text: "", pageref: "B16" }],
       },
     });
     const { actorUpdate, items } = mapGcaCharacterToGworld(character);
@@ -267,6 +302,22 @@ describe("mapGcaCharacterToGworld", () => {
     const trait = items.find((i) => i.name === "Extra Hit Points");
     expect(trait.system.levels).toBe(2);
     expect(trait.system.points).toBe(4);
+  });
+});
+
+describe("extractTrailingNumericLevel", () => {
+  it("splits a GCA-style '<name> (<N>)' into name and level", () => {
+    expect(extractTrailingNumericLevel("Extra DX (1)")).toEqual({ name: "Extra DX", level: 1 });
+    expect(extractTrailingNumericLevel("Regeneration (2)")).toEqual({ name: "Regeneration", level: 2 });
+  });
+
+  it("returns null for a non-numeric parenthetical (a text LevelName or a modifier list)", () => {
+    expect(extractTrailingNumericLevel("Wealth (Comfortable)")).toBeNull();
+    expect(extractTrailingNumericLevel("Extra HT (Size, -10%)")).toBeNull();
+  });
+
+  it("returns null when there's no trailing parenthetical at all", () => {
+    expect(extractTrailingNumericLevel("Combat Reflexes")).toBeNull();
   });
 });
 
